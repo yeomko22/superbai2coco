@@ -12,12 +12,11 @@ from tqdm import tqdm
 random.seed("1234")
 
 
-def get_categories(superbai_path: str) -> (List[dict], dict):
+def get_categories(superbai_path: str, merge_label: bool) -> (List[dict], dict):
     categories = []
     category_label_to_id = {}
     with open(f"{superbai_path}/project.json") as f:
         project_json = json.loads(f.read())
-
         object_classes = project_json["object_detection"]["object_classes"]
         for i, object_class in enumerate(object_classes):
             categories.append({
@@ -26,6 +25,10 @@ def get_categories(superbai_path: str) -> (List[dict], dict):
                 "name": object_class["name"]
             })
             category_label_to_id[object_class["id"]] = i
+    if merge_label:
+        categories = [categories[0]]
+        categories[0]["name"] = "figure"
+        category_label_to_id = {key: 0 for key in category_label_to_id}
     return categories, category_label_to_id
 
 
@@ -144,8 +147,8 @@ def get_bbox_dict(superbai_dir: str, category_label_to_id: dict) -> dict:
 
 
 def get_coco_json(labels: List[str], categories: List[dict], image_info_dict: dict, bbox_dict: dict):
-    image_id = 0
-    bbox_id = 0
+    image_id = 1
+    bbox_id = 1
     coco_json = {
         "type": "instances",
         "categories": categories,
@@ -159,7 +162,6 @@ def get_coco_json(labels: List[str], categories: List[dict], image_info_dict: di
             "width": image_info_dict[label]["width"],
             "id": image_id,
         })
-        image_id += 1
         bboxes = bbox_dict[label]
         for bbox in bboxes:
             coco_json["annotations"].append({
@@ -173,14 +175,17 @@ def get_coco_json(labels: List[str], categories: List[dict], image_info_dict: di
                 'segmentation': []  # This script is not for segmentation
             })
             bbox_id += 1
+        image_id += 1
     return coco_json
 
 
 parser = argparse.ArgumentParser(
     description='This script support converting voc format xmls to coco format json')
-parser.add_argument('--superbai_dir', type=str, default=None, help='path to superbai directory.')
-parser.add_argument('--origin_dir', type=str, default=None, help='path to origin dataset.')
-parser.add_argument('--output_dir', type=str, default='output.json', help='path to output json file')
+parser.add_argument('--superbai_dir', required=True, type=str, help='path to superbai directory.')
+parser.add_argument('--origin_dir', required=True, type=str, help='path to origin dataset.')
+parser.add_argument('--output_dir', required=True, type=str, help='path to output json file')
+parser.add_argument('--merge_label', default=True, type=bool, help='whether merge the labels into one label')
+
 
 if __name__ == '__main__':
     # parse arguments
@@ -188,6 +193,7 @@ if __name__ == '__main__':
     superbai_dir = args.superbai_dir
     origin_dir = args.origin_dir
     output_dir = args.output_dir
+    merge_label = args.merge_label
 
     # generate output directories
     Path(f"{output_dir}/annotations").mkdir(parents=True, exist_ok=True)
@@ -195,7 +201,8 @@ if __name__ == '__main__':
     Path(f"{output_dir}/val").mkdir(parents=True, exist_ok=True)
 
     # preprocess superbai style labels to generte coco json
-    categories, category_label_to_id = get_categories(superbai_dir)
+    categories, category_label_to_id = get_categories(superbai_dir, merge_label)
+
     image_info_dict = get_image_info_dict(superbai_dir)
     bbox_dict = get_bbox_dict(superbai_dir, category_label_to_id)
 
@@ -204,8 +211,8 @@ if __name__ == '__main__':
 
     # generate and write coco json
     train_coco_json = get_coco_json(train_labels, categories, image_info_dict, bbox_dict)
-    val_coco_json = get_coco_json(train_labels, categories, image_info_dict, bbox_dict)
-    with open(f"{output_dir}/annotations/train.json", "w") as f:
+    val_coco_json = get_coco_json(val_labels, categories, image_info_dict, bbox_dict)
+    with open(f"{output_dir}/annotations/custom_train.json", "w") as f:
         f.write(json.dumps(train_coco_json))
-    with open(f"{output_dir}/annotations/val.json", "w") as f:
+    with open(f"{output_dir}/annotations/custom_val.json", "w") as f:
         f.write(json.dumps(val_coco_json))
