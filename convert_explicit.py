@@ -6,6 +6,7 @@ import shutil
 from collections import defaultdict
 from pathlib import Path
 from typing import List
+from PIL import Image
 
 from tqdm import tqdm
 
@@ -145,6 +146,30 @@ def get_bbox_dict(superbai_dir: str, category_label_to_id: dict) -> dict:
     return bbox_dict
 
 
+def add_padding(output_dir, target_dir, labels, bbox_dict):
+    for label in labels:
+        imagepath = f"{output_dir}/{target_dir}/{label}.jpg"
+        image = Image.open(imagepath).convert("RGB")
+        width, height = image.size
+        if width == height:
+            continue
+        elif width > height:
+            padded = Image.new(image.mode, (width, width), 0)
+            move = (width - height) // 2
+            padded.paste(image, (0, move))
+            for bboxes in bbox_dict[label]:
+                for bbox_d in bboxes:
+                    bbox_d["bbox"][1] + move
+        else:
+            padded = Image.new(image.mode, (height, height), 0)
+            move = (height - width) // 2
+            padded.paste(image, (move, 0))
+            for bboxes in bbox_dict[label]:
+                for bbox_d in bboxes:
+                    bbox_d["bbox"][0] + move
+        padded.save(imagepath)
+
+
 def get_coco_json(labels: List[str], categories: List[dict], image_info_dict: dict, bbox_dict: dict):
     image_id = 1
     bbox_id = 1
@@ -187,6 +212,7 @@ parser.add_argument('--train_origin', required=True, type=str, help='path to tra
 parser.add_argument('--val_origin', required=True, type=str, help='path to val origin dataset.')
 parser.add_argument('--output_dir', required=True, type=str, help='path to output json file')
 parser.add_argument('--merge_label', default=True, type=bool, help='whether merge the labels into one label')
+parser.add_argument('--padding', default=True, type=bool, help='whether to add padding')
 
 
 if __name__ == '__main__':
@@ -199,6 +225,8 @@ if __name__ == '__main__':
     val_origin = args.val_origin
     output_dir = args.output_dir
     merge_label = args.merge_label
+    padding = args.padding
+
 
     # generate output directories
     Path(f"{output_dir}/annotations").mkdir(parents=True, exist_ok=True)
@@ -220,6 +248,9 @@ if __name__ == '__main__':
         superbai_val_meta=superbai_val_meta,
         output_dir=output_dir
     )
+    if padding:
+        add_padding(output_dir, "train", train_labels, bbox_dict)
+        add_padding(output_dir, "val", val_labels, bbox_dict)
 
     # generate and write coco json
     train_coco_json = get_coco_json(train_labels, categories, image_info_dict, bbox_dict)
