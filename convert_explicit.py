@@ -13,7 +13,7 @@ from tqdm import tqdm
 random.seed("1234")
 
 
-def get_categories(superbai_path: str, merge_label: bool) -> (List[dict], dict):
+def get_categories(superbai_path: str) -> (List[dict], dict):
     categories = []
     category_label_to_id = {}
     with open(f"{superbai_path}/project.json") as f:
@@ -26,10 +26,6 @@ def get_categories(superbai_path: str, merge_label: bool) -> (List[dict], dict):
                 "name": object_class["name"]
             })
             category_label_to_id[object_class["id"]] = i
-    if merge_label:
-        categories = [categories[0]]
-        categories[0]["name"] = "figure"
-        category_label_to_id = {key: 0 for key in category_label_to_id}
     return categories, category_label_to_id
 
 
@@ -58,7 +54,7 @@ def get_dst_paths(output_dir: str, dirtype: str, src_paths: List[str], origin_pa
 
 def copy_files(src_paths: List[str], dst_paths: List[str]) -> None:
     print(f"start copying {len(src_paths)} files")
-    for src_path, dst_path in tqdm(zip(src_paths, dst_paths)):
+    for src_path, dst_path in tqdm(zip(src_paths, dst_paths), total=len(src_paths)):
         shutil.copyfile(src_path, dst_path)
     print(f"finish copying {len(src_paths)} files")
 
@@ -147,7 +143,8 @@ def get_bbox_dict(superbai_dir: str, category_label_to_id: dict) -> dict:
 
 
 def add_padding(output_dir, target_dir, labels, bbox_dict):
-    for label in labels:
+    print(f"start add padding to {target_dir} {len(labels)} files")
+    for label in tqdm(labels, total=len(labels)):
         imagepath = f"{output_dir}/{target_dir}/{label}.jpg"
         image = Image.open(imagepath).convert("RGB")
         width, height = image.size
@@ -157,16 +154,14 @@ def add_padding(output_dir, target_dir, labels, bbox_dict):
             padded = Image.new(image.mode, (width, width), 0)
             move = (width - height) // 2
             padded.paste(image, (0, move))
-            for bboxes in bbox_dict[label]:
-                for bbox_d in bboxes:
-                    bbox_d["bbox"][1] + move
+            for bbox_d in bbox_dict[label]:
+                bbox_d["bbox"][1] += move
         else:
             padded = Image.new(image.mode, (height, height), 0)
             move = (height - width) // 2
             padded.paste(image, (move, 0))
-            for bboxes in bbox_dict[label]:
-                for bbox_d in bboxes:
-                    bbox_d["bbox"][0] + move
+            for bbox_d in bbox_dict[label]:
+                bbox_d["bbox"][0] += move
         padded.save(imagepath)
 
 
@@ -180,10 +175,11 @@ def get_coco_json(labels: List[str], categories: List[dict], image_info_dict: di
         "annotations": []
     }
     for label in labels:
+        size = max(image_info_dict[label]["height"], image_info_dict[label]["width"])
         coco_json["images"].append({
             "file_name": f"{label}.jpg",
-            "height": image_info_dict[label]["height"],
-            "width": image_info_dict[label]["width"],
+            "height": size,
+            "width": size,
             "id": image_id,
         })
         bboxes = bbox_dict[label]
@@ -191,7 +187,7 @@ def get_coco_json(labels: List[str], categories: List[dict], image_info_dict: di
             coco_json["annotations"].append({
                 'image_id': image_id,
                 'id': bbox_id,
-                'area': image_info_dict[label]["height"] * image_info_dict[label]["width"],
+                'area': size * size,
                 'iscrowd': 0,
                 'bbox': [int(x) for x in bbox["bbox"]],
                 'category_id': bbox["class_id"],
@@ -211,7 +207,6 @@ parser.add_argument('--superbai_val_meta', required=True, type=str, help='path t
 parser.add_argument('--train_origin', required=True, type=str, help='path to train origin dataset.')
 parser.add_argument('--val_origin', required=True, type=str, help='path to val origin dataset.')
 parser.add_argument('--output_dir', required=True, type=str, help='path to output json file')
-parser.add_argument('--merge_label', default=True, type=bool, help='whether merge the labels into one label')
 parser.add_argument('--padding', default=True, type=bool, help='whether to add padding')
 
 
@@ -234,7 +229,7 @@ if __name__ == '__main__':
     Path(f"{output_dir}/val").mkdir(parents=True, exist_ok=True)
 
     # preprocess superbai style labels to generte coco json
-    categories, category_label_to_id = get_categories(superbai_dir, merge_label)
+    categories, category_label_to_id = get_categories(superbai_dir)
 
     image_info_dict = get_image_info_dict(superbai_dir)
     bbox_dict = get_bbox_dict(superbai_dir, category_label_to_id)
